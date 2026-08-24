@@ -247,8 +247,7 @@ jobs:
             --junit-prefix=py${{ matrix.python-version }} \
             --cov=lib/TWCManager \
             --cov-report=xml:test-results/coverage.xml \
-            --cov-report=term-missing \
-            2>/dev/null || echo "No unit tests found yet"
+            --cov-report=term-missing
 
       - name: Upload test results
         if: always()
@@ -300,8 +299,7 @@ jobs:
             -v \
             --tb=short \
             --junit-xml=test-results/junit-venv.xml \
-            --junit-prefix=py${{ matrix.python-version }}.venv \
-            2>/dev/null || true
+            --junit-prefix=py${{ matrix.python-version }}.venv
 
       - name: Upload venv test results
         if: always()
