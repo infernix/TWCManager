@@ -822,10 +822,10 @@
         #"commandPolicy": "prefer_ble",
 
         "teslaAPI": {
-          "enabled": true,
+          "enabled": true
         },
         "teslaBLE": {
-          "enabled": false,
+          "enabled": false
         },
         "teslaFleetTelemetryMQTT": {
           "enabled": false,
@@ -842,7 +842,7 @@
           "enabled": false,
           "url": "http://homeautomation.lan:8123",
           "longLivedToken": "abcdef123456-your-ha-token-here"
-        }
+        },
 
         # The TeslaMate integration allows TWCManager to fetch API key details directly from
         # your TeslaMate instance's database. This removes the need to manage multiple sets of API
