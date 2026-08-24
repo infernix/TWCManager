@@ -181,7 +181,7 @@ def CreateHTTPHandlerClass(master):
                 searchpath=[
                     pathlib.Path(__file__).resolve().parent.as_posix()
                     + "/themes/"
-                    + master.settings.get("webControlTheme", "Modern")
+                    + master.settings.get("webControlTheme", "Default")
                     + "/",
                     pathlib.Path(__file__).resolve().parent.as_posix()
                     + "/themes/Default/",
