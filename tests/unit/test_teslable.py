@@ -32,3 +32,18 @@ def test_empty_success_output_is_accepted():
     result = ble._sendCommand_internal("TESTVIN", "charging-set-amps", 6)
 
     assert result == "ok"
+
+
+def test_set_charge_rate_converts_vehicle_object_to_vin():
+    ble = TeslaBLE.__new__(TeslaBLE)
+    ble.wakeVehicle = Mock(return_value=True)
+    ble.sendCommand = Mock(return_value="ok")
+    ble.parseCommandOutput = Mock(return_value=True)
+    vehicle = Mock()
+    vehicle.VIN = "TESTVIN"
+
+    result = ble.setChargeRate(16, vehicle)
+
+    assert result is True
+    ble.wakeVehicle.assert_called_once_with("TESTVIN")
+    ble.sendCommand.assert_called_once_with("TESTVIN", "charging-set-amps", 16)

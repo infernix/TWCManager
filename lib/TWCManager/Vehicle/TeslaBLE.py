@@ -569,28 +569,31 @@ class TeslaBLE:
         """
         try:
             if vehicle:
-                # Set charge rate for specific vehicle
+                # Other vehicle modules use vehicle objects; BLE commands use VINs.
+                vehicle_vin = getattr(vehicle, "VIN", vehicle)
                 logger.debug(
-                    f"Setting charge rate {charge_rate}A for vehicle {vehicle}"
+                    f"Setting charge rate {charge_rate}A for vehicle {vehicle_vin}"
                 )
 
                 # Wake vehicle first - don't fail if wake fails, but log it
-                wake_result = self.wakeVehicle(vehicle)
+                wake_result = self.wakeVehicle(vehicle_vin)
                 if not wake_result:
                     logger.warning(
-                        f"Wake command may have failed for {vehicle}, proceeding with charge rate"
+                        f"Wake command may have failed for {vehicle_vin}, proceeding with charge rate"
                     )
 
-                ret = self.sendCommand(vehicle, "charging-set-amps", charge_rate)
+                ret = self.sendCommand(
+                    vehicle_vin, "charging-set-amps", charge_rate
+                )
                 if ret is None:
                     logger.error(
-                        f"Failed to send charging-set-amps command to {vehicle}"
+                        f"Failed to send charging-set-amps command to {vehicle_vin}"
                     )
                     return False
 
                 success = self.parseCommandOutput(ret)
                 logger.info(
-                    f"Set charge rate {charge_rate}A for {vehicle}: {'success' if success else 'failed'}"
+                    f"Set charge rate {charge_rate}A for {vehicle_vin}: {'success' if success else 'failed'}"
                 )
                 return success
             else:

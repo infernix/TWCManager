@@ -321,6 +321,10 @@ def background_tasks_thread(master):
                     vehicleModule.applyChargeLimit(limit=task["limit"])
                 elif task["cmd"] == "charge":
                     vehicleModule.car_api_charge(task)
+                elif task["cmd"] == "setChargeRate":
+                    vehicleModule.setChargeRate(
+                        task["charge_rate"], task.get("vehicle")
+                    )
                 elif task["cmd"] == "checkArrival":
                     # Use the policy-tracked limit, not TeslaAPI's own
                     # lastChargeLimitApplied: that attribute is only updated

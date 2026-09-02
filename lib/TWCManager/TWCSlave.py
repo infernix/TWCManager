@@ -152,6 +152,22 @@ class TWCSlave:
         # The vehicle now enforces the limit, so the TWC must not constrain it.
         return self.wiringMaxAmps
 
+    def _queue_vehicle_rate_restore(self):
+        vehicle = self.getLastVehicle()
+        vin = getattr(vehicle, "VIN", None)
+        if not vin:
+            return False
+
+        self.master.queue_background_task(
+            {
+                "cmd": "setChargeRate",
+                "charge_rate": self.wiringMaxAmps,
+                "vehicle": vehicle,
+                "vin": vin,
+            }
+        )
+        return True
+
     def print_status(self, heartbeatData):
         try:
             debugOutput = "SHB %02X%02X: %02X %05.2f/%05.2fA %02X%02X" % (
@@ -909,14 +925,12 @@ class TWCSlave:
             # sure the car isn't left capped below what TWC is about to offer
             # (e.g. leftover from API control, the Tesla app, or never raised
             # since startup) before relying on the TWC-side value alone.
-            if not self.vehicleRateRaised and (
-                now - self.__vehicleRateRaiseAttemptTime >= 60
+            if (
+                not self.vehicleRateRaised
+                and now - self.__vehicleRateRaiseAttemptTime >= 60
             ):
                 self.__vehicleRateRaiseAttemptTime = now
-                result = self.vehicleModule.setChargeRate(
-                    self.wiringMaxAmps, self.getLastVehicle()
-                )
-                if result is not False:
+                if self._queue_vehicle_rate_restore():
                     self.vehicleRateRaised = True
             self.APIcontrol = False
 

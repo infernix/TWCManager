@@ -306,7 +306,7 @@ class TWCMaster:
 
     @staticmethod
     def _background_task_key(task):
-        if task["cmd"] == "charge" and task.get("vin"):
+        if task["cmd"] in ("charge", "setChargeRate") and task.get("vin"):
             return (task["cmd"], task["vin"])
         return task["cmd"]
 

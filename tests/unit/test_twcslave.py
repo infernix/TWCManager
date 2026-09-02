@@ -485,6 +485,31 @@ class TestTWCSlaveVehicleRateControl:
         slave.master.stopCarsCharging.assert_not_called()
         slave.vehicleModule.setChargeRate.assert_not_called()
 
+    def test_vehicle_rate_restore_is_queued_for_known_vin(self, slave):
+        vehicle = Mock()
+        vehicle.VIN = "TESTVIN"
+        slave.getLastVehicle = Mock(return_value=vehicle)
+
+        result = slave._queue_vehicle_rate_restore()
+
+        assert result is True
+        slave.master.queue_background_task.assert_called_once_with(
+            {
+                "cmd": "setChargeRate",
+                "charge_rate": 16,
+                "vehicle": vehicle,
+                "vin": "TESTVIN",
+            }
+        )
+
+    def test_vehicle_rate_restore_waits_for_known_vin(self, slave):
+        slave.getLastVehicle = Mock(return_value=None)
+
+        result = slave._queue_vehicle_rate_restore()
+
+        assert result is False
+        slave.master.queue_background_task.assert_not_called()
+
     def test_hybrid_mode_leaves_six_amps_under_twc_control(self, slave):
         result = slave._apply_vehicle_rate_control(6, 3)
 

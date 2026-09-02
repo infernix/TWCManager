@@ -762,3 +762,27 @@ class TestBackgroundChargeTasks:
 
         assert ("charge", "VIN_A") not in master.backgroundTasksCmds
         assert ("charge", "VIN_B") in master.backgroundTasksCmds
+
+    def test_rate_restore_tasks_are_isolated_per_vin(self, master):
+        master.queue_background_task(
+            {"cmd": "setChargeRate", "charge_rate": 16, "vin": "VIN_A"}
+        )
+        master.queue_background_task(
+            {"cmd": "setChargeRate", "charge_rate": 16, "vin": "VIN_B"}
+        )
+
+        assert master.backgroundTasksQueue.qsize() == 2
+        assert ("setChargeRate", "VIN_A") in master.backgroundTasksCmds
+        assert ("setChargeRate", "VIN_B") in master.backgroundTasksCmds
+
+    def test_repeated_rate_restore_updates_queued_vin_task(self, master):
+        master.queue_background_task(
+            {"cmd": "setChargeRate", "charge_rate": 12, "vin": "VIN_A"}
+        )
+        master.queue_background_task(
+            {"cmd": "setChargeRate", "charge_rate": 16, "vin": "VIN_A"}
+        )
+
+        assert master.backgroundTasksQueue.qsize() == 1
+        queued_task = master.backgroundTasksQueue.get_nowait()
+        assert queued_task["charge_rate"] == 16
