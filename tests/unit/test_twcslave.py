@@ -496,12 +496,12 @@ class TestTWCSlaveVehicleRateControl:
         slave.master.stopCarsCharging.assert_not_called()
         slave.vehicleModule.setChargeRate.assert_not_called()
 
-    def test_vehicle_rate_restore_is_queued_for_known_vin(self, slave):
+    def test_vehicle_rate_is_queued_for_known_vin(self, slave):
         vehicle = Mock()
         vehicle.VIN = "TESTVIN"
         slave.getLastVehicle = Mock(return_value=vehicle)
 
-        result = slave._queue_vehicle_rate_restore()
+        result = slave._queue_vehicle_rate(16)
 
         assert result is True
         slave.master.queue_background_task.assert_called_once_with(
@@ -513,10 +513,10 @@ class TestTWCSlaveVehicleRateControl:
             }
         )
 
-    def test_vehicle_rate_restore_waits_for_known_vin(self, slave):
+    def test_vehicle_rate_waits_for_known_vin(self, slave):
         slave.getLastVehicle = Mock(return_value=None)
 
-        result = slave._queue_vehicle_rate_restore()
+        result = slave._queue_vehicle_rate(16)
 
         assert result is False
         slave.master.queue_background_task.assert_not_called()
@@ -527,3 +527,30 @@ class TestTWCSlaveVehicleRateControl:
         assert result is None
         slave.master.stopCarsCharging.assert_not_called()
         slave.vehicleModule.setChargeRate.assert_not_called()
+
+    def test_positive_vehicle_rate_control_is_queued_off_heartbeat(self, slave):
+        vehicle = Mock(VIN="TESTVIN")
+        slave.getLastVehicle = Mock(return_value=vehicle)
+        slave._TWCSlave__lastAPIAmpsRequest = 0
+
+        result = slave._apply_vehicle_rate_control(4, 3)
+
+        assert result == 16
+        slave.master.queue_background_task.assert_called_once_with(
+            {
+                "cmd": "setChargeRate",
+                "charge_rate": 4,
+                "vehicle": vehicle,
+                "vin": "TESTVIN",
+            }
+        )
+        slave.vehicleModule.setChargeRate.assert_not_called()
+
+    def test_positive_vehicle_rate_control_stays_zero_until_vin_known(self, slave):
+        slave.getLastVehicle = Mock(return_value=None)
+        slave._TWCSlave__lastAPIAmpsRequest = 0
+
+        result = slave._apply_vehicle_rate_control(4, 3)
+
+        assert result == 0
+        slave.master.queue_background_task.assert_not_called()

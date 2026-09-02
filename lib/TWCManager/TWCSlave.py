@@ -148,14 +148,13 @@ class TWCSlave:
             self.__lastAPIAmpsRequest = time.time()
             self.__lastAPIAmpsRepeat = 0
             self.__lastAPIAmpsValue = int(desiredAmpsOffered)
-            self.vehicleModule.setChargeRate(
-                int(desiredAmpsOffered), self.getLastVehicle()
-            )
+            if not self._queue_vehicle_rate(int(desiredAmpsOffered)):
+                return 0
 
         # The vehicle now enforces the limit, so the TWC must not constrain it.
         return self.wiringMaxAmps
 
-    def _queue_vehicle_rate_restore(self):
+    def _queue_vehicle_rate(self, chargeRate):
         vehicle = self.getLastVehicle()
         vin = getattr(vehicle, "VIN", None)
         if not vin:
@@ -164,7 +163,7 @@ class TWCSlave:
         self.master.queue_background_task(
             {
                 "cmd": "setChargeRate",
-                "charge_rate": self.wiringMaxAmps,
+                "charge_rate": chargeRate,
                 "vehicle": vehicle,
                 "vin": vin,
             }
@@ -936,7 +935,7 @@ class TWCSlave:
                 and now - self.__vehicleRateRaiseAttemptTime >= 60
             ):
                 self.__vehicleRateRaiseAttemptTime = now
-                if self._queue_vehicle_rate_restore():
+                if self._queue_vehicle_rate(self.wiringMaxAmps):
                     self.vehicleRateRaised = True
             self.APIcontrol = False
 

@@ -1968,14 +1968,10 @@ while True:
         # Sleep 5 seconds so the user might see the error.
         time.sleep(5)
 
-# Make sure any volatile data is written to disk before exiting
-master.queue_background_task({"cmd": "saveSettings"})
-
-# Wait for background tasks thread to finish all tasks.
-# Note that there is no such thing as backgroundTasksThread.stop(). Because we
-# set the thread type to daemon, it will be automatically killed when we exit
-# this program.
-master.backgroundTasksQueue.join()
+# Persist settings directly. Background vehicle commands are intentionally not
+# drained during shutdown: they can take longer than systemd's stop timeout and
+# the charging transition has already completed through TWC heartbeats.
+master.saveSettings()
 
 # Close the input module
 master.getInterfaceModule().close()
