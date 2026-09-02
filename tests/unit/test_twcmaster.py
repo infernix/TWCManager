@@ -832,4 +832,5 @@ class TestGracefulShutdown:
         master.shutdownRequested = True
         master.shutdownRequestedAt = 100
 
-        assert master.gracefulShutdownComplete(now=115) is True
+        assert master.gracefulShutdownComplete(now=144) is False
+        assert master.gracefulShutdownComplete(now=145) is True

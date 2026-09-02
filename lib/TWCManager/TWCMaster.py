@@ -417,7 +417,7 @@ class TWCMaster:
     def isShuttingDown(self):
         return self.shutdownRequested
 
-    def gracefulShutdownComplete(self, now=None, timeout=15, settleTime=2):
+    def gracefulShutdownComplete(self, now=None, timeout=45, settleTime=2):
         if not self.shutdownRequested:
             return False
 
