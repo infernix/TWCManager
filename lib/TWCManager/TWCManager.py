@@ -37,6 +37,7 @@ import time
 import traceback
 import datetime
 import yaml
+import signal
 import threading
 from TWCManager.TWCMaster import TWCMaster
 import requests
@@ -830,6 +831,21 @@ if "PYTEST_CURRENT_TEST" in os.environ:
     import sys
 
     sys.exit(0)
+shutdownSignal = None
+
+
+def request_graceful_shutdown(signum, _frame):
+    global shutdownSignal
+    if shutdownSignal is not None:
+        return
+    shutdownSignal = signum
+    logger.info("Received signal %s; beginning graceful shutdown.", signum)
+    master.beginGracefulShutdown()
+
+
+signal.signal(signal.SIGTERM, request_graceful_shutdown)
+signal.signal(signal.SIGINT, request_graceful_shutdown)
+
 
 while True:
     try:
@@ -846,6 +862,10 @@ while True:
         time.sleep(0.025)
 
         now = time.time()
+        if master.gracefulShutdownComplete(now):
+            logger.info("Charging current stopped; completing graceful shutdown.")
+            break
+
 
         if config["config"]["fakeMaster"] == 1:
             # A real master sends 5 copies of linkready1 and linkready2 whenever

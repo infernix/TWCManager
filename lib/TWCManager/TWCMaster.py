@@ -117,6 +117,9 @@ class TWCMaster:
             "scheduledAmpsStartHour": -1,
             "sendServerTime": 0,
         }
+        self.shutdownRequested = False
+        self.shutdownRequestedAt = 0
+        self.shutdownZeroSince = None
         self.advanceHistorySnap()
         if config["config"].get("maxAmpsAllowedFromGrid", None) is None:
             self.setLimitAmpsToDivideAmongSlaves(
@@ -392,12 +395,50 @@ class TWCMaster:
         return self.settings["kWhDelivered"]
 
     def getMaxAmpsToDivideAmongSlaves(self):
+        if self.shutdownRequested:
+            return 0
         if self.maxAmpsToDivideAmongSlaves > self.limitAmpsToDivideAmongSlaves:
             return self.limitAmpsToDivideAmongSlaves
         elif self.maxAmpsToDivideAmongSlaves > 0:
             return self.maxAmpsToDivideAmongSlaves
         else:
             return 0
+
+    def beginGracefulShutdown(self):
+        if self.shutdownRequested:
+            return
+        self.shutdownRequested = True
+        self.shutdownRequestedAt = time.time()
+        self.shutdownZeroSince = None
+        logger.info(
+            "Graceful shutdown requested; offering 0A until charging current stops."
+        )
+
+    def isShuttingDown(self):
+        return self.shutdownRequested
+
+    def gracefulShutdownComplete(self, now=None, timeout=15, settleTime=2):
+        if not self.shutdownRequested:
+            return False
+
+        now = time.time() if now is None else now
+        if now - self.shutdownRequestedAt >= timeout:
+            logger.warning("Graceful shutdown timed out after %ss.", timeout)
+            return True
+
+        slaves = self.getSlaveTWCs()
+        if not slaves:
+            return True
+
+        if any(slave.reportedAmpsActual >= 1.0 for slave in slaves):
+            self.shutdownZeroSince = None
+            return False
+
+        if self.shutdownZeroSince is None:
+            self.shutdownZeroSince = now
+            return False
+
+        return now - self.shutdownZeroSince >= settleTime
 
     def getModuleByName(self, name):
         module = self.modules.get(name)

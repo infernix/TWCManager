@@ -786,3 +786,50 @@ class TestBackgroundChargeTasks:
         assert master.backgroundTasksQueue.qsize() == 1
         queued_task = master.backgroundTasksQueue.get_nowait()
         assert queued_task["charge_rate"] == 16
+
+
+class TestGracefulShutdown:
+    """Test restart handoff while vehicles are charging."""
+
+    @pytest.fixture
+    def master(self):
+        from TWCManager.TWCMaster import TWCMaster
+
+        config = {
+            "config": {
+                "debugOutputToFile": False,
+                "subtractChargerLoad": False,
+                "treatGenerationAsGridDelivery": False,
+                "wiringMaxAmpsAllTWCs": 32,
+                "maxAmpsAllowedFromGrid": None,
+            }
+        }
+        return TWCMaster("AB", config)
+
+    def test_shutdown_forces_zero_offer_without_losing_policy_limit(self, master):
+        master.setMaxAmpsToDivideAmongSlaves(16)
+
+        with patch("TWCManager.TWCMaster.time.time", return_value=100):
+            master.beginGracefulShutdown()
+
+        assert master.getMaxAmpsToDivideAmongSlaves() == 0
+        assert master.maxAmpsToDivideAmongSlaves == 16
+
+    def test_shutdown_waits_for_current_to_stop_and_settle(self, master):
+        slave = Mock(reportedAmpsActual=7)
+        master.addSlaveTWC(slave)
+        master.shutdownRequested = True
+        master.shutdownRequestedAt = 100
+
+        assert master.gracefulShutdownComplete(now=105) is False
+
+        slave.reportedAmpsActual = 0
+        assert master.gracefulShutdownComplete(now=106) is False
+        assert master.gracefulShutdownComplete(now=108) is True
+
+    def test_shutdown_timeout_prevents_hung_restart(self, master):
+        master.addSlaveTWC(Mock(reportedAmpsActual=7))
+        master.shutdownRequested = True
+        master.shutdownRequestedAt = 100
+
+        assert master.gracefulShutdownComplete(now=115) is True

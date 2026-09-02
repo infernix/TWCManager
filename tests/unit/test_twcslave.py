@@ -485,6 +485,17 @@ class TestTWCSlaveVehicleRateControl:
         slave.master.stopCarsCharging.assert_not_called()
         slave.vehicleModule.setChargeRate.assert_not_called()
 
+    def test_shutdown_zero_target_does_not_queue_vehicle_command(self, slave):
+        slave.master.isShuttingDown = Mock(return_value=True)
+        slave.reportedAmpsActual = 8
+
+        result = slave._apply_vehicle_rate_control(0, 3)
+
+        assert result == 0
+        assert slave.APIcontrol is False
+        slave.master.stopCarsCharging.assert_not_called()
+        slave.vehicleModule.setChargeRate.assert_not_called()
+
     def test_vehicle_rate_restore_is_queued_for_known_vin(self, slave):
         vehicle = Mock()
         vehicle.VIN = "TESTVIN"

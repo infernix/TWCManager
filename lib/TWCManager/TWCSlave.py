@@ -112,6 +112,9 @@ class TWCSlave:
         return None
 
     def _apply_vehicle_rate_control(self, desiredAmpsOffered, chargeRateControl):
+        if getattr(self.master, "isShuttingDown", lambda: False)() is True:
+            self.APIcontrol = False
+            return 0
         useVehicleControl = chargeRateControl == 2 or (
             chargeRateControl == 3 and desiredAmpsOffered < 6
         )
@@ -816,7 +819,10 @@ class TWCSlave:
             desiredAmpsOffered = minAmpsToOffer
 
         dampenChanges = False
-        if self.master.getModuleByName("Policy").policyIsGreen():
+        if (
+            getattr(self.master, "isShuttingDown", lambda: False)() is not True
+            and self.master.getModuleByName("Policy").policyIsGreen()
+        ):
             if (now - self.timeLastAmpsDesiredFlipped) < self.startStopDelay:
                 dampenChanges = True
         else:
