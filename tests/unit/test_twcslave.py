@@ -465,13 +465,24 @@ class TestTWCSlaveVehicleRateControl:
         return slave
 
     @pytest.mark.parametrize("charge_rate_control", [2, 3])
-    def test_zero_target_stops_vehicle_and_keeps_twc_at_zero(
+    def test_zero_target_stops_charging_vehicle_and_keeps_twc_at_zero(
         self, slave, charge_rate_control
     ):
+        slave.reportedAmpsActual = 8
+
         result = slave._apply_vehicle_rate_control(0, charge_rate_control)
 
         assert result == 0
         slave.master.stopCarsCharging.assert_called_once_with("TESTVIN")
+        slave.vehicleModule.setChargeRate.assert_not_called()
+
+    def test_zero_target_does_not_repeat_stop_for_idle_vehicle(self, slave):
+        slave.reportedAmpsActual = 0
+
+        result = slave._apply_vehicle_rate_control(0, 3)
+
+        assert result == 0
+        slave.master.stopCarsCharging.assert_not_called()
         slave.vehicleModule.setChargeRate.assert_not_called()
 
     def test_hybrid_mode_leaves_six_amps_under_twc_control(self, slave):

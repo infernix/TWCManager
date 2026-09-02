@@ -122,10 +122,13 @@ class TWCSlave:
         self.vehicleRateRaised = False
         self.__vehicleRateRaiseAttemptTime = 0
 
-        # A zero target is a stop request, not a charge-rate request. Keep the
-        # TWC offer at zero as a fail-safe while the command is processed.
+        # A zero target is a stop request, not a charge-rate request. Only send
+        # it while the vehicle is still drawing current; repeated stop commands
+        # produce a false failure once the vehicle reports "not_charging".
+        # Keep the TWC offer at zero as a fail-safe while the command is processed.
         if desiredAmpsOffered == 0:
-            self.master.stopCarsCharging(self.currentVIN)
+            if self.reportedAmpsActual >= 1.0:
+                self.master.stopCarsCharging(self.currentVIN)
             return 0
 
         if (
