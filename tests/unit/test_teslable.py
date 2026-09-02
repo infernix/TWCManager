@@ -32,6 +32,8 @@ def test_empty_success_output_is_accepted():
     result = ble._sendCommand_internal("TESTVIN", "charging-set-amps", 6)
 
     assert result == "ok"
+    command = ble._run_command_with_timeout.call_args.args[0]
+    assert "-debug" not in command
 
 
 def test_set_charge_rate_converts_vehicle_object_to_vin():

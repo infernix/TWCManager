@@ -501,7 +501,6 @@ class TeslaBLE:
 
             command_string = [
                 self.binaryPath,
-                "-debug",
                 "-ble",
                 "-vin",
                 vin,
