@@ -757,7 +757,7 @@ class TestBackgroundChargeTasks:
         master.queue_background_task(task_a)
         master.queue_background_task(task_b)
 
-        queued_task = master.backgroundTasksQueue.get_nowait()
+        queued_task = master.getBackgroundTask()
         master.doneBackgroundTask(queued_task)
 
         assert ("charge", "VIN_A") not in master.backgroundTasksCmds
@@ -784,8 +784,53 @@ class TestBackgroundChargeTasks:
         )
 
         assert master.backgroundTasksQueue.qsize() == 1
-        queued_task = master.backgroundTasksQueue.get_nowait()
+        queued_task = master.getBackgroundTask()
         assert queued_task["charge_rate"] == 16
+
+    def test_stop_task_precedes_normal_tasks_and_cancels_queued_rate(self, master):
+        master.queue_background_task({"cmd": "saveSettings"})
+        master.queue_background_task(
+            {"cmd": "setChargeRate", "charge_rate": 4, "vin": "VIN_A"}
+        )
+
+        master.stopCarsCharging("VIN_A")
+
+        stop_task = master.getBackgroundTask()
+        assert stop_task == {"cmd": "charge", "charge": False, "vin": "VIN_A"}
+        master.doneBackgroundTask(stop_task)
+
+        normal_task = master.getBackgroundTask()
+        assert normal_task == {"cmd": "saveSettings"}
+        master.doneBackgroundTask(normal_task)
+
+    def test_stop_promotes_over_queued_start_for_same_vin(self, master):
+        master.queue_background_task({"cmd": "saveSettings"})
+        master.queue_background_task(
+            {"cmd": "charge", "charge": True, "vin": "VIN_A"}
+        )
+
+        master.stopCarsCharging("VIN_A")
+
+        stop_task = master.getBackgroundTask()
+        assert stop_task == {"cmd": "charge", "charge": False, "vin": "VIN_A"}
+        master.doneBackgroundTask(stop_task)
+
+        normal_task = master.getBackgroundTask()
+        assert normal_task == {"cmd": "saveSettings"}
+        master.doneBackgroundTask(normal_task)
+
+    def test_stop_queued_while_start_active_is_not_lost(self, master):
+        master.queue_background_task(
+            {"cmd": "charge", "charge": True, "vin": "VIN_A"}
+        )
+        active_start = master.getBackgroundTask()
+
+        master.stopCarsCharging("VIN_A")
+        master.doneBackgroundTask(active_start)
+
+        stop_task = master.getBackgroundTask()
+        assert stop_task == {"cmd": "charge", "charge": False, "vin": "VIN_A"}
+        master.doneBackgroundTask(stop_task)
 
 
 class TestGracefulShutdown:

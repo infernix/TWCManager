@@ -21,8 +21,9 @@ logger = LoggerFactory.get_logger("Master", "Master")
 
 class TWCMaster:
     allowed_flex = 0
-    backgroundTasksQueue = queue.Queue()
+    backgroundTasksQueue = queue.PriorityQueue()
     backgroundTasksCmds = {}
+    backgroundTasksActive = {}
     backgroundTasksLock = threading.Lock()
     backgroundTasksDelayed = []
     config = None
@@ -97,10 +98,12 @@ class TWCMaster:
         self.slaveTWCRoundRobin = []
         self.slaveTWCs = {}
         self.stats = {"moduleDispatch": {}, "moduleFailures": {}, "moduleSuccess": {}}
-        self.backgroundTasksQueue = queue.Queue()
+        self.backgroundTasksQueue = queue.PriorityQueue()
         self.backgroundTasksCmds = {}
+        self.backgroundTasksActive = {}
         self.backgroundTasksLock = threading.Lock()
         self.backgroundTasksDelayed = []
+        self.backgroundTaskSequence = 0
         self.settings = {
             "chargeNowAmps": 0,
             "chargeStopMode": "1",
@@ -313,6 +316,12 @@ class TWCMaster:
             return (task["cmd"], task["vin"])
         return task["cmd"]
 
+    @staticmethod
+    def _background_task_priority(task):
+        if task["cmd"] == "charge" and task.get("charge") is False:
+            return 0
+        return 10
+
     def delete_background_task(self, task):
         key = self._background_task_key(task)
         self.getBackgroundTasksLock()
@@ -322,11 +331,20 @@ class TWCMaster:
         finally:
             self.releaseBackgroundTasksLock()
 
-    def doneBackgroundTask(self, task):
+    def delete_background_task_by_key(self, task):
         key = self._background_task_key(task)
         self.getBackgroundTasksLock()
         try:
             self.backgroundTasksCmds.pop(key, None)
+        finally:
+            self.releaseBackgroundTasksLock()
+
+    def doneBackgroundTask(self, task):
+        key = self._background_task_key(task)
+        self.getBackgroundTasksLock()
+        try:
+            if self.backgroundTasksActive.get(key) is task:
+                del self.backgroundTasksActive[key]
         finally:
             self.releaseBackgroundTasksLock()
 
@@ -337,9 +355,7 @@ class TWCMaster:
         return self.allowed_flex
 
     def getBackgroundTask(self):
-        result = None
-
-        while result is None:
+        while True:
             # Insert any delayed tasks
             while (
                 self.backgroundTasksDelayed
@@ -347,13 +363,23 @@ class TWCMaster:
             ):
                 self.queue_background_task(self.backgroundTasksDelayed.pop(0)[1])
 
-            # Get the next task
             try:
-                result = self.backgroundTasksQueue.get(timeout=30)
+                _priority, _sequence, task = self.backgroundTasksQueue.get(timeout=30)
             except queue.Empty:
                 continue
 
-        return result
+            key = self._background_task_key(task)
+            self.getBackgroundTasksLock()
+            try:
+                if self.backgroundTasksCmds.get(key) is task:
+                    del self.backgroundTasksCmds[key]
+                    self.backgroundTasksActive[key] = task
+                    return task
+            finally:
+                self.releaseBackgroundTasksLock()
+
+            # A queued task can be superseded or cancelled before execution.
+            self.backgroundTasksQueue.task_done()
 
     def getBackgroundTasksLock(self):
         self.backgroundTasksLock.acquire()
@@ -1305,20 +1331,28 @@ class TWCMaster:
             return
 
         key = self._background_task_key(task)
+        priority = self._background_task_priority(task)
         self.getBackgroundTasksLock()
         try:
-            if key in self.backgroundTasksCmds:
-                # Repeated tasks for the same operation and vehicle update the
-                # queued task. Charge commands for different VINs must remain
-                # independent so a multi-car stop reaches every vehicle.
-                self.backgroundTasksCmds[key].update(task)
+            queuedTask = self.backgroundTasksCmds.get(key)
+            if queuedTask is not None:
+                if priority >= self._background_task_priority(queuedTask):
+                    # Repeated tasks for the same operation and vehicle update
+                    # the queued task. Different VINs remain independent.
+                    queuedTask.update(task)
+                    return
+                # A stop supersedes a queued start. Replace the registry entry;
+                # getBackgroundTask will discard the stale queue item.
+            elif self.backgroundTasksActive.get(key) == task:
                 return
 
             self.backgroundTasksCmds[key] = task
+            self.backgroundTaskSequence += 1
+            sequence = self.backgroundTaskSequence
         finally:
             self.releaseBackgroundTasksLock()
 
-        self.backgroundTasksQueue.put(task)
+        self.backgroundTasksQueue.put((priority, sequence, task))
 
     def registerModule(self, module):
         # This function is used during module instantiation to either reference a
@@ -1911,6 +1945,8 @@ class TWCMaster:
         # 2 = Stop the car(s) charging by refusing to respond to slave TWCs
         # 3 = Send TWC Stop command to each slave
         stopMode = int(self.settings.get("chargeStopMode", 1))
+        if vin:
+            self.delete_background_task_by_key({"cmd": "setChargeRate", "vin": vin})
         if stopMode == 1:
             self.queue_background_task({"cmd": "charge", "charge": False, "vin": vin})
             if self.stopTimeout == datetime.max:

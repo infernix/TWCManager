@@ -217,7 +217,7 @@ class TeslaAPI:
                 logger.log(logging.INFO8, "Attempting token refresh")
                 self.apiRefresh()
 
-    def car_api_available(self, charge=None, applyLimit=None):
+    def car_api_available(self, charge=None, applyLimit=None, vin=None):
         now = time.time()
         needSleep = False
         apiResponseDict = {}
@@ -291,9 +291,13 @@ class TeslaAPI:
                     self.updateCarApiLastErrorTime()
                     return False
 
-            if self.getVehicleCount() > 0 and (charge or applyLimit):
-                # Wake cars if needed
+            if self.getVehicleCount() > 0 and (
+                charge is not None or applyLimit is True
+            ):
+                # Wake only the vehicle targeted by a per-VIN command.
                 for vehicle in self.getCarApiVehicles():
+                    if vin and vehicle.VIN != vin:
+                        continue
                     if charge is True and vehicle.stopAskingToStartCharging:
                         # Vehicle is in a state (complete or charging) already
                         # which doesn't make sense for us to keep requesting it
@@ -566,40 +570,52 @@ class TeslaAPI:
         # queue_background_task({'cmd':'charge', 'charge':<True/False>})
 
         charge = None
+        vin = None
         if task:
             charge = task.get("charge", None)
+            vin = task.get("vin", None)
 
         now = time.time()
         apiResponseDict = {}
-        if not charge:
-            # Whenever we are going to tell vehicles to stop charging, reset
-            # per-vehicle wake state so the next start cycle is fresh.
-            for vehicle in self.getCarApiVehicles():
-                vehicle.stopAskingToStartCharging = False
-                vehicle.firstChargeNeededTime = 0
-                vehicle.firstWakeAttemptTime = 0
-                vehicle.delayNextWakeAttempt = 0
-
-        if now - self.getLastStartOrStopChargeTime() < 60:
-            # Don't start or stop more often than once a minute
+        if charge is True and now - self.getLastStartOrStopChargeTime() < 60:
+            # Repeated starts are suppressed, but an urgent stop must never be
+            # delayed by a previous command's cooldown.
             logger.log(
                 logging.DEBUG2,
                 "car_api_charge return because not long enough since last carApiLastStartOrStopChargeTime",
             )
             return "error"
 
-        if self.car_api_available(charge=charge) is False:
+        if self.car_api_available(charge=charge, vin=vin) is False:
             logger.log(
                 logging.INFO8,
                 "car_api_charge return because car_api_available() == False",
             )
             return "error"
 
+        vehicles = [
+            vehicle
+            for vehicle in self.getCarApiVehicles()
+            if not vin or vehicle.VIN == vin
+        ]
+        if vin and not vehicles:
+            logger.warning("TeslaAPI has no vehicle matching VIN %s", vin)
+            return "error"
+
+        if not charge:
+            # Whenever we are going to tell vehicles to stop charging, reset
+            # per-vehicle wake state so the next start cycle is fresh.
+            for vehicle in vehicles:
+                vehicle.stopAskingToStartCharging = False
+                vehicle.firstChargeNeededTime = 0
+                vehicle.firstWakeAttemptTime = 0
+                vehicle.delayNextWakeAttempt = 0
+
         startOrStop = "start" if charge else "stop"
         result = "success"
         logger.log(logging.INFO8, "startOrStop is set to " + str(startOrStop))
 
-        for vehicle in self.getCarApiVehicles():
+        for vehicle in vehicles:
             if charge and vehicle.stopAskingToStartCharging:
                 logger.log(
                     logging.INFO8,
@@ -610,6 +626,7 @@ class TeslaAPI:
                 continue
 
             if not vehicle.ready():
+                result = "error"
                 continue
 
             if not vehicle.update_charge() or not vehicle.update_location():

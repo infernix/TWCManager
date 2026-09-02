@@ -2,8 +2,8 @@
 # and sends commands to the higher priority modules first, before falling-back to lower
 # priority modules on failure.
 #
-# Retry Logic: For every 10 priority points, we get 1 retry before falling back.
-# Example: Priority 20 (TeslaBLE) = 2 retries, Priority 10 (TeslaAPI) = 1 retry
+# Read-only methods retain priority-based retries. State-changing backends own
+# their retry policy so a failed BLE command can fall back to TeslaAPI promptly.
 import logging
 from TWCManager.Logging.LoggerFactory import LoggerFactory
 
@@ -113,9 +113,14 @@ class VehiclePriority:
                     )
                     continue
 
-                # Calculate retries for this priority level
-                retries = self._calculate_retries(priority)
-                max_attempts = retries + 1  # +1 for the initial attempt
+                # Command backends already implement their own bounded retries.
+                # Retrying here multiplies BLE timeouts and delays API fallback.
+                retries = (
+                    0
+                    if name in self.COMMAND_METHODS
+                    else self._calculate_retries(priority)
+                )
+                max_attempts = retries + 1
 
                 logger.debug(
                     f"VehiclePriority: Trying {module_name} for {name} (priority {priority}, {max_attempts} attempts)"

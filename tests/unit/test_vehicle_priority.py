@@ -461,9 +461,9 @@ class TestBLENotLoaded:
         task = {"cmd": "charge", "charge": True}
         result = priority.car_api_charge(task)
 
-        # BLE at priority 20 gets 3 attempts before fallback (priority // 10 = 2 retries)
+        # Command backends own their retries; fallback must not multiply BLE timeouts.
         assert result is True
-        assert ble_module.car_api_charge.call_count == 3
+        ble_module.car_api_charge.assert_called_once_with(task)
         tesla_api.car_api_charge.assert_called_once_with(task)
 
     def test_ble_success_does_not_call_api(self, priority):
