@@ -307,12 +307,16 @@ class TeslaBLE:
                         )
                         continue
 
-                # Consider operation successful if any commands succeeded, or if all
-                # vehicles were skipped (already in desired state, schedule blocking, etc.).
-                # Skipped vehicles = successfully handled by deciding not to re-send.
+                # A start can be considered handled when any eligible vehicle
+                # succeeds. An untargeted stop must succeed for every attempted
+                # vehicle; otherwise TeslaAPI must receive the fallback and stop
+                # the full configured fleet.
                 if attempted_count > 0:
-                    # Commands were attempted; succeed only if at least one succeeded
-                    overall_success = success_count > 0
+                    overall_success = (
+                        success_count > 0
+                        if charge
+                        else success_count == attempted_count
+                    )
                     logger.info(
                         f"BLE command result: {success_count}/{attempted_count} attempted vehicles succeeded"
                         + (f", {skipped_count} skipped" if skipped_count > 0 else "")

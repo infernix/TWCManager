@@ -72,3 +72,16 @@ def test_stop_uses_one_short_ble_attempt_before_api_fallback():
     ble.sendCommand.assert_called_once_with(
         "TESTVIN", "charging-stop", retries=0, timeout=15
     )
+
+
+def test_untargeted_stop_fails_when_any_vehicle_stop_fails():
+    ble = TeslaBLE.__new__(TeslaBLE)
+    ble.master = Mock()
+    ble.master.settings = {"Vehicles": {"VIN_A": {}, "VIN_B": {}}}
+    ble._stopAskingToStartCharging = {}
+    ble.stopCharging = Mock(side_effect=[True, False])
+
+    result = ble.car_api_charge({"charge": False})
+
+    assert result is False
+    assert ble.stopCharging.call_count == 2
