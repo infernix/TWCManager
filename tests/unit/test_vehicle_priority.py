@@ -442,6 +442,26 @@ class TestBLENotLoaded:
 
         assert result is False
 
+    def test_pending_stop_suppresses_stale_start_api_fallback(self, priority):
+        ble_module = Mock()
+        ble_module.car_api_charge = Mock(return_value=False)
+        tesla_api = Mock()
+        tesla_api.car_api_charge = Mock(return_value=True)
+        priority.master.getModuleByPriority = Mock(
+            side_effect=[
+                ("TeslaBLE", ble_module, 20),
+                ("TeslaAPI", tesla_api, 10),
+            ]
+        )
+        priority.master.isVehicleStopPending = Mock(side_effect=[False, True])
+
+        task = {"cmd": "charge", "charge": True, "vin": "VIN_A"}
+        result = priority.car_api_charge(task)
+
+        assert result is False
+        ble_module.car_api_charge.assert_called_once_with(task)
+        tesla_api.car_api_charge.assert_not_called()
+
     def test_ble_tried_before_api_when_both_loaded(self, priority):
         """When BLE and TeslaAPI are both loaded, BLE is tried first."""
         ble_module = Mock()

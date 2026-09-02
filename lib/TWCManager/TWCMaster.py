@@ -26,6 +26,8 @@ class TWCMaster:
     backgroundTasksActive = {}
     backgroundTasksLock = threading.Lock()
     backgroundTasksDelayed = []
+    urgentStopQueue = queue.Queue()
+    urgentStopTasks = {}
     config = None
     consumptionValues = {}
     consumptionAmpsValues = {}
@@ -104,6 +106,8 @@ class TWCMaster:
         self.backgroundTasksLock = threading.Lock()
         self.backgroundTasksDelayed = []
         self.backgroundTaskSequence = 0
+        self.urgentStopQueue = queue.Queue()
+        self.urgentStopTasks = {}
         self.settings = {
             "chargeNowAmps": 0,
             "chargeStopMode": "1",
@@ -164,8 +168,11 @@ class TWCMaster:
         else:
             return 0
 
-    def cancelStopCarsCharging(self):
-        self.delete_background_task({"cmd": "charge", "charge": False})
+    def cancelStopCarsCharging(self, vin=None):
+        self.delete_background_task(
+            {"cmd": "charge", "charge": False, "vin": vin}
+        )
+        self.cancelVehicleStop(vin)
 
     def checkForUpdates(self):
         # This function is used by the Web UI and later on will be used by the console to detect TWCManager Updates
@@ -380,6 +387,62 @@ class TWCMaster:
 
             # A queued task can be superseded or cancelled before execution.
             self.backgroundTasksQueue.task_done()
+
+    @staticmethod
+    def _urgent_stop_key(vin):
+        return vin or "*"
+
+    def queueUrgentStop(self, vin=None):
+        key = self._urgent_stop_key(vin)
+        task = {"cmd": "charge", "charge": False, "vin": vin}
+        self.getBackgroundTasksLock()
+        try:
+            if key in self.urgentStopTasks:
+                return
+            self.urgentStopTasks[key] = task
+        finally:
+            self.releaseBackgroundTasksLock()
+        self.urgentStopQueue.put(task)
+
+    def getUrgentStop(self):
+        while True:
+            task = self.urgentStopQueue.get()
+            key = self._urgent_stop_key(task.get("vin"))
+            self.getBackgroundTasksLock()
+            try:
+                current = self.urgentStopTasks.get(key) is task
+            finally:
+                self.releaseBackgroundTasksLock()
+            if current:
+                return task
+            self.urgentStopQueue.task_done()
+
+    def doneUrgentStop(self, task):
+        key = self._urgent_stop_key(task.get("vin"))
+        self.getBackgroundTasksLock()
+        try:
+            if self.urgentStopTasks.get(key) is task:
+                del self.urgentStopTasks[key]
+        finally:
+            self.releaseBackgroundTasksLock()
+        self.urgentStopQueue.task_done()
+
+    def isVehicleStopPending(self, vin=None):
+        key = self._urgent_stop_key(vin)
+        self.getBackgroundTasksLock()
+        try:
+            return "*" in self.urgentStopTasks or key in self.urgentStopTasks
+        finally:
+            self.releaseBackgroundTasksLock()
+
+    def cancelVehicleStop(self, vin=None):
+        key = self._urgent_stop_key(vin)
+        self.getBackgroundTasksLock()
+        try:
+            self.urgentStopTasks.pop(key, None)
+            self.urgentStopTasks.pop("*", None)
+        finally:
+            self.releaseBackgroundTasksLock()
 
     def getBackgroundTasksLock(self):
         self.backgroundTasksLock.acquire()
@@ -1914,7 +1977,6 @@ class TWCMaster:
                     * self.getRealPowerFactor(avgCurrent),
                 )
             )
-
             self.settings["history"] = [
                 e
                 for e in self.settings["history"]
@@ -1927,12 +1989,16 @@ class TWCMaster:
         # below
         stopMode = int(self.settings.get("chargeStopMode", 1))
         if stopMode == 1:
-            self.queue_background_task({"cmd": "charge", "charge": True})
+            self.queue_background_task(
+                {"cmd": "charge", "charge": True, "vin": vin}
+            )
             self.getModuleByName("Policy").clearOverride()
         elif stopMode == 2:
             self.settings["respondToSlaves"] = 1
         elif stopMode == 3:
-            self.queue_background_task({"cmd": "charge", "charge": True, "vin": vin})
+            self.queue_background_task(
+                {"cmd": "charge", "charge": True, "vin": vin}
+            )
 
     def stopCarsCharging(self, vin=None):
         # This is called by components (mainly TWCSlave) who want to signal to us to
@@ -1945,10 +2011,15 @@ class TWCMaster:
         # 2 = Stop the car(s) charging by refusing to respond to slave TWCs
         # 3 = Send TWC Stop command to each slave
         stopMode = int(self.settings.get("chargeStopMode", 1))
-        if vin:
-            self.delete_background_task_by_key({"cmd": "setChargeRate", "vin": vin})
         if stopMode == 1:
-            self.queue_background_task({"cmd": "charge", "charge": False, "vin": vin})
+            if vin:
+                self.delete_background_task_by_key(
+                    {"cmd": "setChargeRate", "vin": vin}
+                )
+            self.delete_background_task(
+                {"cmd": "charge", "charge": True, "vin": vin}
+            )
+            self.queueUrgentStop(vin)
             if self.stopTimeout == datetime.max:
                 self.stopTimeout = datetime.now() + timedelta(seconds=10)
             elif datetime.now() > self.stopTimeout:

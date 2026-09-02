@@ -406,6 +406,22 @@ def background_tasks_thread(master):
         # in the queue are done.
         master.doneBackgroundTask(task)
 
+def urgent_stop_tasks_thread(master):
+    while True:
+        task = master.getUrgentStop()
+        try:
+            vehicleModule = master.getModuleByName("VehiclePriority")
+            if not vehicleModule:
+                vehicleModule = get_vehicle_module()
+            vehicleModule.car_api_charge(task)
+        except Exception as e:
+            logger.error(
+                f"UrgentStopError: {traceback.format_exc()}, occurred when stopping vehicle: {e}",
+                extra={"colored": "red"},
+            )
+        finally:
+            master.doneUrgentStop(task)
+
 
 def check_green_energy():
     global config, master
@@ -806,6 +822,9 @@ master.loadSettings()
 backgroundTasksThread = threading.Thread(target=background_tasks_thread, args=(master,))
 backgroundTasksThread.daemon = True
 backgroundTasksThread.start()
+urgentStopThread = threading.Thread(target=urgent_stop_tasks_thread, args=(master,))
+urgentStopThread.daemon = True
+urgentStopThread.start()
 
 master.queue_background_task({"cmd": "sunrise"}, 30)
 

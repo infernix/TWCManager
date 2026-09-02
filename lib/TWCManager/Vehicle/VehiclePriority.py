@@ -113,6 +113,18 @@ class VehiclePriority:
                     )
                     continue
 
+                if (
+                    name == "car_api_charge"
+                    and args
+                    and isinstance(args[0], dict)
+                    and args[0].get("charge") is True
+                    and self.master.isVehicleStopPending(args[0].get("vin")) is True
+                ):
+                    logger.info(
+                        "VehiclePriority: suppressing stale charge start while stop is pending"
+                    )
+                    return False
+
                 # Command backends already implement their own bounded retries.
                 # Retrying here multiplies BLE timeouts and delays API fallback.
                 retries = (

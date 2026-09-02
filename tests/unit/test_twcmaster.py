@@ -787,7 +787,7 @@ class TestBackgroundChargeTasks:
         queued_task = master.getBackgroundTask()
         assert queued_task["charge_rate"] == 16
 
-    def test_stop_task_precedes_normal_tasks_and_cancels_queued_rate(self, master):
+    def test_stop_uses_urgent_lane_and_cancels_queued_rate(self, master):
         master.queue_background_task({"cmd": "saveSettings"})
         master.queue_background_task(
             {"cmd": "setChargeRate", "charge_rate": 4, "vin": "VIN_A"}
@@ -795,15 +795,16 @@ class TestBackgroundChargeTasks:
 
         master.stopCarsCharging("VIN_A")
 
-        stop_task = master.getBackgroundTask()
+        stop_task = master.getUrgentStop()
         assert stop_task == {"cmd": "charge", "charge": False, "vin": "VIN_A"}
-        master.doneBackgroundTask(stop_task)
+        assert master.isVehicleStopPending("VIN_A") is True
+        master.doneUrgentStop(stop_task)
 
         normal_task = master.getBackgroundTask()
         assert normal_task == {"cmd": "saveSettings"}
         master.doneBackgroundTask(normal_task)
 
-    def test_stop_promotes_over_queued_start_for_same_vin(self, master):
+    def test_stop_urgent_lane_supersedes_queued_start_for_same_vin(self, master):
         master.queue_background_task({"cmd": "saveSettings"})
         master.queue_background_task(
             {"cmd": "charge", "charge": True, "vin": "VIN_A"}
@@ -811,26 +812,39 @@ class TestBackgroundChargeTasks:
 
         master.stopCarsCharging("VIN_A")
 
-        stop_task = master.getBackgroundTask()
+        stop_task = master.getUrgentStop()
         assert stop_task == {"cmd": "charge", "charge": False, "vin": "VIN_A"}
-        master.doneBackgroundTask(stop_task)
+        master.doneUrgentStop(stop_task)
 
         normal_task = master.getBackgroundTask()
         assert normal_task == {"cmd": "saveSettings"}
         master.doneBackgroundTask(normal_task)
 
-    def test_stop_queued_while_start_active_is_not_lost(self, master):
+    def test_stop_runs_while_start_is_active(self, master):
         master.queue_background_task(
             {"cmd": "charge", "charge": True, "vin": "VIN_A"}
         )
         active_start = master.getBackgroundTask()
 
         master.stopCarsCharging("VIN_A")
+
+        stop_task = master.getUrgentStop()
+        assert stop_task == {"cmd": "charge", "charge": False, "vin": "VIN_A"}
+        master.doneUrgentStop(stop_task)
         master.doneBackgroundTask(active_start)
 
-        stop_task = master.getBackgroundTask()
-        assert stop_task == {"cmd": "charge", "charge": False, "vin": "VIN_A"}
-        master.doneBackgroundTask(stop_task)
+    def test_requeued_stop_survives_completion_of_cancelled_active_stop(self, master):
+        master.queueUrgentStop("VIN_A")
+        first_stop = master.getUrgentStop()
+
+        master.cancelVehicleStop("VIN_A")
+        master.queueUrgentStop("VIN_A")
+        master.doneUrgentStop(first_stop)
+
+        assert master.isVehicleStopPending("VIN_A") is True
+        second_stop = master.getUrgentStop()
+        assert second_stop is not first_stop
+        master.doneUrgentStop(second_stop)
 
 
 class TestGracefulShutdown:

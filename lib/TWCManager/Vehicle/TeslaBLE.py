@@ -181,6 +181,13 @@ class TeslaBLE:
         except Exception:
             return False
 
+    def _isVehicleStopPending(self, vin):
+        return (
+            self.master is not None
+            and hasattr(self.master, "isVehicleStopPending")
+            and self.master.isVehicleStopPending(vin) is True
+        )
+
     def car_api_charge(self, task):
         """
         Enhanced car_api_charge method with proper priority system integration.
@@ -216,6 +223,11 @@ class TeslaBLE:
             if vin:
                 logger.debug(f"BLE command for specific VIN: {vin}, charge: {charge}")
 
+                if charge and self._isVehicleStopPending(vin):
+                    logger.info(
+                        f"BLE: suppressing stale charge start for {vin} while stop is pending"
+                    )
+                    return False
                 if charge:
                     if self._stopAskingToStartCharging.get(vin):
                         logger.debug(
@@ -255,6 +267,12 @@ class TeslaBLE:
 
                 for vehicle in self.master.settings["Vehicles"].keys():
                     try:
+                        if charge and self._isVehicleStopPending(vehicle):
+                            logger.info(
+                                f"BLE: suppressing stale charge start for {vehicle} while stop is pending"
+                            )
+                            skipped_count += 1
+                            continue
                         if charge:
                             if self._stopAskingToStartCharging.get(vehicle):
                                 logger.debug(
@@ -581,6 +599,11 @@ class TeslaBLE:
             if vehicle:
                 # Other vehicle modules use vehicle objects; BLE commands use VINs.
                 vehicle_vin = getattr(vehicle, "VIN", vehicle)
+                if self._isVehicleStopPending(vehicle_vin):
+                    logger.info(
+                        f"Skipping BLE charge-rate command for {vehicle_vin} while stop is pending"
+                    )
+                    return False
                 logger.debug(
                     f"Setting charge rate {charge_rate}A for vehicle {vehicle_vin}"
                 )
@@ -619,6 +642,11 @@ class TeslaBLE:
                 total_vehicles = len(self.master.settings["Vehicles"])
 
                 for vehicle_vin in self.master.settings["Vehicles"].keys():
+                    if self._isVehicleStopPending(vehicle_vin):
+                        logger.info(
+                            f"Skipping BLE charge-rate command for {vehicle_vin} while stop is pending"
+                        )
+                        continue
                     try:
                         # Wake vehicle first - don't fail if wake fails, but log it
                         wake_result = self.wakeVehicle(vehicle_vin)
@@ -783,6 +811,11 @@ class TeslaBLE:
 
     def startCharging(self, vin):
         try:
+            if self._isVehicleStopPending(vin):
+                logger.info(
+                    f"Skipping BLE charge start for {vin} while stop is pending"
+                )
+                return False
             logger.debug(f"Starting charging for vehicle {vin}")
 
             # Wake vehicle first - don't fail if wake fails, but log it

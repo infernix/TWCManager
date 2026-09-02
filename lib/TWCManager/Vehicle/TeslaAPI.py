@@ -575,6 +575,12 @@ class TeslaAPI:
             charge = task.get("charge", None)
             vin = task.get("vin", None)
 
+        if charge is True and self.master.isVehicleStopPending(vin) is True:
+            logger.info(
+                "TeslaAPI: suppressing stale charge start while stop is pending"
+            )
+            return "error"
+
         now = time.time()
         apiResponseDict = {}
         if charge is True and now - self.getLastStartOrStopChargeTime() < 60:
