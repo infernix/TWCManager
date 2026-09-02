@@ -36,6 +36,15 @@ def test_empty_success_output_is_accepted():
     assert "-debug" not in command
 
 
+def test_command_timeout_override_is_forwarded_to_runner():
+    ble = make_ble((b"", b"", 0))
+
+    result = ble._sendCommand_internal("TESTVIN", "charging-stop", timeout=3)
+
+    assert result == "ok"
+    assert ble._run_command_with_timeout.call_args.kwargs["timeout"] == 3
+
+
 def test_set_charge_rate_converts_vehicle_object_to_vin():
     ble = TeslaBLE.__new__(TeslaBLE)
     ble.wakeVehicle = Mock(return_value=True)
@@ -49,3 +58,17 @@ def test_set_charge_rate_converts_vehicle_object_to_vin():
     assert result is True
     ble.wakeVehicle.assert_called_once_with("TESTVIN")
     ble.sendCommand.assert_called_once_with("TESTVIN", "charging-set-amps", 16)
+
+
+def test_stop_uses_one_short_ble_attempt_before_api_fallback():
+    ble = TeslaBLE.__new__(TeslaBLE)
+    ble.stopCommandTimeout = 15
+    ble.sendCommand = Mock(return_value="ok")
+    ble.parseCommandOutput = Mock(return_value=True)
+
+    result = ble.stopCharging("TESTVIN")
+
+    assert result is True
+    ble.sendCommand.assert_called_once_with(
+        "TESTVIN", "charging-stop", retries=0, timeout=15
+    )

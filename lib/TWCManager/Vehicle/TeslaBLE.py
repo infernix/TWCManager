@@ -94,6 +94,9 @@ class TeslaBLE:
         # Enhanced configuration parameters
         self.commandTimeout = ble_config.get("commandTimeout", 5)
         self.maxRetries = ble_config.get("maxRetries", 3)
+        self.stopCommandTimeout = min(
+            self.commandTimeout, ble_config.get("stopCommandTimeout", 15)
+        )
         self.retryDelay = ble_config.get("retryDelay", 2)
         self.processGroupManagement = ble_config.get("processGroupManagement", True)
         self.dockerCompatibility = ble_config.get("dockerCompatibility", True)
@@ -454,7 +457,7 @@ class TeslaBLE:
             # Always ensure pipe is closed after pairing attempt
             self._ensure_pipe_closed()
 
-    def sendCommand(self, vin, command, args=None):
+    def sendCommand(self, vin, command, args=None, retries=None, timeout=None):
         """
         Enhanced sendCommand with improved error handling and timeout management.
         Returns command output string or None on failure.
@@ -462,9 +465,16 @@ class TeslaBLE:
         # Accept either a VIN string or a vehicle object with a .VIN attribute
         if hasattr(vin, "VIN"):
             vin = vin.VIN
-        return self._execute_with_retry(self._sendCommand_internal, vin, command, args)
+        return self._execute_with_retry(
+            self._sendCommand_internal,
+            vin,
+            command,
+            args,
+            timeout,
+            retries=retries,
+        )
 
-    def _sendCommand_internal(self, vin, command, args=None):
+    def _sendCommand_internal(self, vin, command, args=None, timeout=None):
         """
         Internal sendCommand implementation (called by retry wrapper).
         Returns command output string or None on failure.
@@ -515,8 +525,9 @@ class TeslaBLE:
                 command_string.append(str(args))
 
             # Use improved timeout handling with process group management
+            commandTimeout = self.commandTimeout if timeout is None else timeout
             stdout, stderr, return_code = self._run_command_with_timeout(
-                command_string, timeout=self.commandTimeout, use_process_group=True
+                command_string, timeout=commandTimeout, use_process_group=True
             )
 
             if stdout is None and stderr is None:
@@ -526,7 +537,7 @@ class TeslaBLE:
             # Check if process was killed due to timeout
             if return_code == -9:  # SIGKILL
                 logger.warning(
-                    f"BLE command '{command}' timed out after {self.commandTimeout}s"
+                    f"BLE command '{command}' timed out after {commandTimeout}s"
                 )
                 return None
             output = stderr.decode("utf-8") if stderr else ""
@@ -813,7 +824,12 @@ class TeslaBLE:
         try:
             logger.debug(f"Stopping charging for vehicle {vin}")
 
-            ret = self.sendCommand(vin, "charging-stop")
+            ret = self.sendCommand(
+                vin,
+                "charging-stop",
+                retries=0,
+                timeout=self.stopCommandTimeout,
+            )
             if ret is None:
                 logger.error(f"Failed to send charging-stop command to {vin}")
                 return False
@@ -1074,7 +1090,7 @@ class TeslaBLE:
             stats["last_error"] = error
             stats["last_error_time"] = time.time()
 
-    def _execute_with_retry(self, func, vin, *args, **kwargs):
+    def _execute_with_retry(self, func, vin, *args, retries=None, **kwargs):
         """
         Execute a function with retry logic, exponential backoff, and circuit breaker.
 
@@ -1094,7 +1110,8 @@ class TeslaBLE:
             self.retry_stats[vin]["circuit_breaker_trips"] += 1
             return None
 
-        for attempt in range(self.maxRetries + 1):
+        retryCount = self.maxRetries if retries is None else retries
+        for attempt in range(retryCount + 1):
             try:
                 result = func(vin, *args, **kwargs)
 
@@ -1103,17 +1120,17 @@ class TeslaBLE:
                     self.circuit_breaker.record_success(vin)
                     if attempt > 0:
                         logger.info(
-                            f"BLE command succeeded on retry attempt {attempt + 1}/{self.maxRetries + 1} for {vin}"
+                            f"BLE command succeeded on retry attempt {attempt + 1}/{retryCount + 1} for {vin}"
                         )
                         self._record_retry_attempt(vin, True)
                     return result
 
                 # Result is None - check if error is transient
-                if attempt < self.maxRetries:
+                if attempt < retryCount:
                     delay = self._calculate_backoff(attempt)
                     logger.info(
                         f"BLE command failed for {vin}, retrying in {delay}s "
-                        f"(attempt {attempt + 1}/{self.maxRetries + 1})"
+                        f"(attempt {attempt + 1}/{retryCount + 1})"
                     )
                     self._record_retry_attempt(vin, False, "transient_error")
                     time.sleep(delay)
@@ -1121,18 +1138,18 @@ class TeslaBLE:
                     # All retries exhausted
                     self.circuit_breaker.record_failure(vin)
                     logger.error(
-                        f"BLE command failed for {vin} after {self.maxRetries + 1} attempts"
+                        f"BLE command failed for {vin} after {retryCount + 1} attempts"
                     )
                     self._record_retry_attempt(vin, False, "max_retries_exceeded")
                     return None
 
             except Exception as e:
                 if self._is_transient_exception(e):
-                    if attempt < self.maxRetries:
+                    if attempt < retryCount:
                         delay = self._calculate_backoff(attempt)
                         logger.warning(
                             f"BLE transient exception for {vin}: {e}, "
-                            f"retrying in {delay}s (attempt {attempt + 1}/{self.maxRetries + 1})"
+                            f"retrying in {delay}s (attempt {attempt + 1}/{retryCount + 1})"
                         )
                         self._record_retry_attempt(
                             vin, False, f"transient_exception: {str(e)[:50]}"
@@ -1142,7 +1159,7 @@ class TeslaBLE:
                         # All retries exhausted
                         self.circuit_breaker.record_failure(vin)
                         logger.error(
-                            f"BLE transient exception for {vin} after {self.maxRetries + 1} attempts: {e}"
+                            f"BLE transient exception for {vin} after {retryCount + 1} attempts: {e}"
                         )
                         self._record_retry_attempt(
                             vin, False, f"exception_max_retries: {str(e)[:50]}"
