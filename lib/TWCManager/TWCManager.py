@@ -863,7 +863,7 @@ while True:
 
         now = time.time()
         if master.gracefulShutdownComplete(now):
-            logger.info("Charging current stopped; completing graceful shutdown.")
+            logger.info("Chargers reached safe handoff level; completing shutdown.")
             break
 
 

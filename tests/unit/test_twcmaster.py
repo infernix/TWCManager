@@ -816,7 +816,12 @@ class TestGracefulShutdown:
         assert master.maxAmpsToDivideAmongSlaves == 16
 
     def test_shutdown_waits_for_current_to_stop_and_settle(self, master):
-        slave = Mock(reportedAmpsActual=7)
+        slave = Mock(
+            reportedAmpsActual=7,
+            lastAmpsOffered=16,
+            reportedAmpsMax=16,
+            minAmpsTWCSupports=6,
+        )
         master.addSlaveTWC(slave)
         master.shutdownRequested = True
         master.shutdownRequestedAt = 100
@@ -827,8 +832,29 @@ class TestGracefulShutdown:
         assert master.gracefulShutdownComplete(now=106) is False
         assert master.gracefulShutdownComplete(now=108) is True
 
+    def test_shutdown_accepts_zero_offer_at_twc_minimum_current(self, master):
+        slave = Mock(
+            reportedAmpsActual=6.5,
+            lastAmpsOffered=0,
+            reportedAmpsMax=6,
+            minAmpsTWCSupports=6,
+        )
+        master.addSlaveTWC(slave)
+        master.shutdownRequested = True
+        master.shutdownRequestedAt = 100
+
+        assert master.gracefulShutdownComplete(now=105) is False
+        assert master.gracefulShutdownComplete(now=107) is True
+
     def test_shutdown_timeout_prevents_hung_restart(self, master):
-        master.addSlaveTWC(Mock(reportedAmpsActual=7))
+        master.addSlaveTWC(
+            Mock(
+                reportedAmpsActual=7,
+                lastAmpsOffered=16,
+                reportedAmpsMax=16,
+                minAmpsTWCSupports=6,
+            )
+        )
         master.shutdownRequested = True
         master.shutdownRequestedAt = 100
 

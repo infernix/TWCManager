@@ -411,7 +411,7 @@ class TWCMaster:
         self.shutdownRequestedAt = time.time()
         self.shutdownZeroSince = None
         logger.info(
-            "Graceful shutdown requested; offering 0A until charging current stops."
+            "Graceful shutdown requested; reducing chargers to a safe handoff level."
         )
 
     def isShuttingDown(self):
@@ -430,7 +430,16 @@ class TWCMaster:
         if not slaves:
             return True
 
-        if any(slave.reportedAmpsActual >= 1.0 for slave in slaves):
+        handoffReady = all(
+            slave.reportedAmpsActual < 1.0
+            or (
+                slave.lastAmpsOffered == 0
+                and slave.reportedAmpsMax <= slave.minAmpsTWCSupports
+                and slave.reportedAmpsActual <= slave.minAmpsTWCSupports + 1
+            )
+            for slave in slaves
+        )
+        if not handoffReady:
             self.shutdownZeroSince = None
             return False
 
