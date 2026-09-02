@@ -97,6 +97,10 @@ class TWCMaster:
         self.slaveTWCRoundRobin = []
         self.slaveTWCs = {}
         self.stats = {"moduleDispatch": {}, "moduleFailures": {}, "moduleSuccess": {}}
+        self.backgroundTasksQueue = queue.Queue()
+        self.backgroundTasksCmds = {}
+        self.backgroundTasksLock = threading.Lock()
+        self.backgroundTasksDelayed = []
         self.settings = {
             "chargeNowAmps": 0,
             "chargeStopMode": "1",
@@ -300,23 +304,30 @@ class TWCMaster:
     def countSlaveTWC(self):
         return int(len(self.slaveTWCRoundRobin))
 
+    @staticmethod
+    def _background_task_key(task):
+        if task["cmd"] == "charge" and task.get("vin"):
+            return (task["cmd"], task["vin"])
+        return task["cmd"]
+
     def delete_background_task(self, task):
-        if (
-            task["cmd"] in self.backgroundTasksCmds
-            and self.backgroundTasksCmds[task["cmd"]] == task
-        ):
-            del self.backgroundTasksCmds[task["cmd"]]["cmd"]
-            del self.backgroundTasksCmds[task["cmd"]]
+        key = self._background_task_key(task)
+        self.getBackgroundTasksLock()
+        try:
+            if self.backgroundTasksCmds.get(key) == task:
+                del self.backgroundTasksCmds[key]
+        finally:
+            self.releaseBackgroundTasksLock()
 
     def doneBackgroundTask(self, task):
-        # Delete task['cmd'] from backgroundTasksCmds such that
-        # queue_background_task() can queue another task['cmd'] in the future.
-        if "cmd" in task:
-            del self.backgroundTasksCmds[task["cmd"]]
+        key = self._background_task_key(task)
+        self.getBackgroundTasksLock()
+        try:
+            self.backgroundTasksCmds.pop(key, None)
+        finally:
+            self.releaseBackgroundTasksLock()
 
         # task_done() must be called to let the queue know the task is finished.
-        # backgroundTasksQueue.join() can then be used to block until all tasks
-        # in the queue are done.
         self.backgroundTasksQueue.task_done()
 
     def getAllowedFlex(self):
@@ -1243,23 +1254,20 @@ class TWCMaster:
             )
             return
 
+        key = self._background_task_key(task)
         self.getBackgroundTasksLock()
         try:
-            if task["cmd"] in self.backgroundTasksCmds:
-                # Some tasks, like cmd='charge', will be called once per second until
-                # a charge starts or we determine the car is done charging.  To avoid
-                # wasting memory queing up a bunch of these tasks when we're handling
-                # a charge cmd already, don't queue two of the same task.
-                self.backgroundTasksCmds[task["cmd"]].update(task)
+            if key in self.backgroundTasksCmds:
+                # Repeated tasks for the same operation and vehicle update the
+                # queued task. Charge commands for different VINs must remain
+                # independent so a multi-car stop reaches every vehicle.
+                self.backgroundTasksCmds[key].update(task)
                 return
 
-            # Insert task['cmd'] in backgroundTasksCmds to prevent queuing another
-            # task['cmd'] till we've finished handling this one.
-            self.backgroundTasksCmds[task["cmd"]] = task
+            self.backgroundTasksCmds[key] = task
         finally:
             self.releaseBackgroundTasksLock()
 
-        # Queue the task to be handled by background_tasks_thread.
         self.backgroundTasksQueue.put(task)
 
     def registerModule(self, module):

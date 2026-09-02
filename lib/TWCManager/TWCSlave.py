@@ -111,6 +111,44 @@ class TWCSlave:
         logger.error("No vehicle module enabled")
         return None
 
+    def _apply_vehicle_rate_control(self, desiredAmpsOffered, chargeRateControl):
+        useVehicleControl = chargeRateControl == 2 or (
+            chargeRateControl == 3 and desiredAmpsOffered < 6
+        )
+        if not useVehicleControl:
+            return None
+
+        self.APIcontrol = True
+        self.vehicleRateRaised = False
+        self.__vehicleRateRaiseAttemptTime = 0
+
+        # A zero target is a stop request, not a charge-rate request. Keep the
+        # TWC offer at zero as a fail-safe while the command is processed.
+        if desiredAmpsOffered == 0:
+            self.master.stopCarsCharging(self.currentVIN)
+            return 0
+
+        if (
+            int(desiredAmpsOffered) == self.__lastAPIAmpsValue
+            and (
+                self.__lastAPIAmpsRepeat > 50
+                or self.__lastAPIAmpsRepeat % 10 != 0
+            )
+        ) or self.__lastAPIAmpsRequest > time.time() - 15:
+            # Some requests don't change the vehicle's charge rate. Repeat one
+            # in ten requests, up to 50 times, no more often than every 15s.
+            self.__lastAPIAmpsRepeat += 1
+        else:
+            self.__lastAPIAmpsRequest = time.time()
+            self.__lastAPIAmpsRepeat = 0
+            self.__lastAPIAmpsValue = int(desiredAmpsOffered)
+            self.vehicleModule.setChargeRate(
+                int(desiredAmpsOffered), self.getLastVehicle()
+            )
+
+        # The vehicle now enforces the limit, so the TWC must not constrain it.
+        return self.wiringMaxAmps
+
     def print_status(self, heartbeatData):
         try:
             debugOutput = "SHB %02X%02X: %02X %05.2f/%05.2fA %02X%02X" % (
@@ -857,42 +895,11 @@ class TWCSlave:
                 # so we need to set desiredAmpsOffered to 0
                 logger.debug("no cars charging, setting desiredAmpsOffered to 0")
                 desiredAmpsOffered = 0
-        elif chargeRateControl == 2 or (
-            chargeRateControl == 3 and desiredAmpsOffered < 6
-        ):
-            # Control is given to the Tesla API to control Charge Rate
-            # We offer the maximum wiring amps from the TWC, and ask the API to control charge rate
-            self.APIcontrol = True
-            self.vehicleRateRaised = False
-            self.__vehicleRateRaiseAttemptTime = 0
-
-            # Call the Tesla API to set the charge rate for vehicle connected to this TWC
-            # TODO: Identify vehicle
-            if (
-                int(desiredAmpsOffered) == self.__lastAPIAmpsValue
-                and (
-                    self.__lastAPIAmpsRepeat > 50 or self.__lastAPIAmpsRepeat % 10 != 0
-                )
-            ) or self.__lastAPIAmpsRequest > time.time() - 15:
-                # Unfortunately some API requests just don't result in the desired amperage being set, so we allow one in 10
-                # to be repeated up to 50, as long as none had been sent in the last 15 seconds
-                # This results in a small number of repeat requests sent to the API each time
-                # we change the target charge rate, but adds stability to the process
-                self.__lastAPIAmpsRepeat += 1
-            else:
-                self.__lastAPIAmpsRequest = time.time()
-                self.__lastAPIAmpsRepeat = 0
-                self.__lastAPIAmpsValue = int(desiredAmpsOffered)
-
-                # Determine vehicle to control
-                targetVehicle = (
-                    None if self.getLastVehicle() is None else self.getLastVehicle()
-                )
-
-                self.vehicleModule.setChargeRate(int(desiredAmpsOffered), targetVehicle)
-
-            desiredAmpsOffered = self.wiringMaxAmps
-
+        vehicleControlledAmps = self._apply_vehicle_rate_control(
+            desiredAmpsOffered, chargeRateControl
+        )
+        if vehicleControlledAmps is not None:
+            desiredAmpsOffered = vehicleControlledAmps
         else:
             # TWC is controlling the charge rate here. The car only ever
             # charges at min(TWC offer, car's own charge rate limit), so make

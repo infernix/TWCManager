@@ -25,6 +25,17 @@ This will download the required golang distribution, and build the tesla-control
 
 If you would prefer to build tesla-control yourself, or you are able to install it as part of a binary package distribution, you can skip this step.
 
+  * Give ```tesla-control``` exclusive access to the Bluetooth controller
+
+On Linux, ```tesla-control``` opens an HCI user channel and cannot share that controller with BlueZ. A running ```bluetoothd``` causes commands to fail with ```can't bind socket to hci user channel: device or resource busy```. On a dedicated TWCManager host, prevent BlueZ from claiming the controller:
+
+```sudo systemctl mask --now bluetooth.service```
+
+If the host needs BlueZ for another workload, use a separate Bluetooth controller for ```tesla-control``` instead of masking the service.
+
+If the controller remains busy after BlueZ stops, power-cycle or replug the controller (or reboot the host) once to clear the stale HCI state.
+
+
   * Restart twcmanager
 
 ```systemctl restart twcmanager```

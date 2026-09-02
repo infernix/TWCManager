@@ -436,3 +436,47 @@ class TestTWCSlaveConfiguration:
         slave = TWCSlave(bytearray(b"AB"), 80, config, mock_master)
         
         assert slave.APIcontrol is False
+
+
+class TestTWCSlaveVehicleRateControl:
+    """Test switching between TWC and vehicle-side charge control."""
+
+    @pytest.fixture
+    def slave(self):
+        from TWCManager.TWCSlave import TWCSlave
+
+        master = Mock()
+        vehicle_module = Mock()
+        master.getModuleByName = Mock(
+            side_effect=lambda name: vehicle_module
+            if name == "VehiclePriority"
+            else None
+        )
+        config = {
+            "config": {
+                "wiringMaxAmpsPerTWC": 16,
+                "useFlexAmpsToStartCharge": False,
+                "startStopDelay": 60,
+                "fakeMaster": False,
+            }
+        }
+        slave = TWCSlave(bytearray(b"AB"), 32, config, master)
+        slave.currentVIN = "TESTVIN"
+        return slave
+
+    @pytest.mark.parametrize("charge_rate_control", [2, 3])
+    def test_zero_target_stops_vehicle_and_keeps_twc_at_zero(
+        self, slave, charge_rate_control
+    ):
+        result = slave._apply_vehicle_rate_control(0, charge_rate_control)
+
+        assert result == 0
+        slave.master.stopCarsCharging.assert_called_once_with("TESTVIN")
+        slave.vehicleModule.setChargeRate.assert_not_called()
+
+    def test_hybrid_mode_leaves_six_amps_under_twc_control(self, slave):
+        result = slave._apply_vehicle_rate_control(6, 3)
+
+        assert result is None
+        slave.master.stopCarsCharging.assert_not_called()
+        slave.vehicleModule.setChargeRate.assert_not_called()

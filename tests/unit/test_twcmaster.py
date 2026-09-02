@@ -709,3 +709,56 @@ class TestSubtractChargerLoadGetMaxAmps:
         assert result > 0
         assert result < 12, f"Offer {result} A seems too high for available solar"
 
+
+
+class TestBackgroundChargeTasks:
+    """Regression tests for multi-vehicle charge command deduplication."""
+
+    @pytest.fixture
+    def master(self):
+        from TWCManager.TWCMaster import TWCMaster
+
+        config = {
+            "config": {
+                "debugOutputToFile": False,
+                "subtractChargerLoad": False,
+                "treatGenerationAsGridDelivery": False,
+                "wiringMaxAmpsAllTWCs": 16,
+                "maxAmpsAllowedFromGrid": None,
+            }
+        }
+        return TWCMaster("AB", config)
+
+    def test_stop_tasks_for_different_vins_are_queued_independently(self, master):
+        master.queue_background_task(
+            {"cmd": "charge", "charge": False, "vin": "VIN_A"}
+        )
+        master.queue_background_task(
+            {"cmd": "charge", "charge": False, "vin": "VIN_B"}
+        )
+
+        assert master.backgroundTasksQueue.qsize() == 2
+        assert ("charge", "VIN_A") in master.backgroundTasksCmds
+        assert ("charge", "VIN_B") in master.backgroundTasksCmds
+
+    def test_repeated_stop_for_same_vin_is_deduplicated(self, master):
+        master.queue_background_task(
+            {"cmd": "charge", "charge": False, "vin": "VIN_A"}
+        )
+        master.queue_background_task(
+            {"cmd": "charge", "charge": False, "vin": "VIN_A"}
+        )
+
+        assert master.backgroundTasksQueue.qsize() == 1
+
+    def test_finishing_one_vin_keeps_other_vin_registered(self, master):
+        task_a = {"cmd": "charge", "charge": False, "vin": "VIN_A"}
+        task_b = {"cmd": "charge", "charge": False, "vin": "VIN_B"}
+        master.queue_background_task(task_a)
+        master.queue_background_task(task_b)
+
+        queued_task = master.backgroundTasksQueue.get_nowait()
+        master.doneBackgroundTask(queued_task)
+
+        assert ("charge", "VIN_A") not in master.backgroundTasksCmds
+        assert ("charge", "VIN_B") in master.backgroundTasksCmds
